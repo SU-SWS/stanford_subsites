@@ -161,8 +161,10 @@ function stanford_subsites_admin_config_form_process_validate(&$form, &$form_sta
 
 function stanford_subsites_admin_config_form_process_submit($form, &$form_state) {
 
+  $original = variable_get("stanford_subsite_content_types", array());
   $values = array_merge($form_state['values'], $form_state['storage']);
   $disabled_types = array_filter($values['stanford_subsite_content_types'], '_give_zero_values');
+  $filtered = array_filter($values['stanford_subsite_content_types'], '_remove_zero_values');
 
   // Loop through the disabled content types and remove their field instances
   foreach($disabled_types as $type => $nothing) {
@@ -180,36 +182,12 @@ function stanford_subsites_admin_config_form_process_submit($form, &$form_state)
       field_delete_instance($instance, FALSE);
     }
 
-    // Get all the nids of the disabled content type and update the alias
-    $q = db_select('node', "n")
-        ->fields("n", array('nid'))
-        ->condition("type", $type)
-        ->execute();
-
-    $nids = array();
-    while($result = $q->fetchAssoc()) {
-      $nids[] = $result['nid'];
-    }
-
-    // Save current action for new aliases and change it to update and
-    // preserve old one.
-    $alias_action = variable_get('pathauto_update_action', 0);
-    variable_set('pathauto_update_action', 1);
-
-    // add a bulk update operation
-    pathauto_node_update_alias_multiple($nids, 'bulkupdate');
-
-    // Restore original setting
-    variable_set('pathauto_update_action', $alias_action);
-
   }
 
   // Remove content types from the list that arent enabled and then
   // store the values of the form
-  $filtered = array_filter($values['stanford_subsite_content_types'], '_remove_zero_values');
   $keys = array_keys($filtered);
   variable_set('stanford_subsite_content_types', $keys);
-
 
   // We now have a list of content types (bundles) that we need to attach an
   // instance of the fields to. Loop through them and attach them
@@ -233,6 +211,38 @@ function stanford_subsites_admin_config_form_process_submit($form, &$form_state)
       field_create_instance($instance);
     }
 
+  }
+
+  // Last but not least. Update the path aliases for all newly added and removed
+  // content types
+  $added = array_diff($keys, $original);
+  $removed = array_diff($original, $keys);
+  $the_diff = array_merge($added , $removed);
+
+  if (count($the_diff)) {
+    foreach ($the_diff as $type) {
+      // Get all the nids of the disabled content type and update the alias
+      $q = db_select('node', "n")
+        ->fields("n", array('nid'))
+        ->condition("type", $type)
+        ->execute();
+
+      $nids = array();
+      while($result = $q->fetchAssoc()) {
+        $nids[] = $result['nid'];
+      }
+
+      // Save current action for new aliases and change it to update and
+      // preserve old one.
+      $alias_action = variable_get('pathauto_update_action', 0);
+      variable_set('pathauto_update_action', 1);
+
+      // add a bulk update operation
+      pathauto_node_update_alias_multiple($nids, 'bulkupdate');
+
+      // Restore original setting
+      variable_set('pathauto_update_action', $alias_action);
+    }
   }
 
   // Clear all the caches
